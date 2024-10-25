@@ -167,8 +167,10 @@ fn rocket() -> _ {
     // Ensure all states are bound
     ensure_states();
 
-    // // Spawn exchange (background thread)
-    // thread::spawn(spawn_exchange);
+    // Spawn exchange (background thread)
+    thread::spawn(spawn_exchange);
+
+    log::info!("starting rocket");
 
     // Spawn Web responder (foreground thread)
     run_responder()

@@ -13,6 +13,8 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 
+use crate::config::config::ConfigExchangeCurrencyAPI;
+use crate::config::config::ConfigExchangeFixer;
 use crate::APP_CONF;
 
 const POLL_RATE_SECONDS: u64 = 259200;
@@ -39,16 +41,15 @@ fn store_rates(rates: HashMap<String, f32>) {
     *store = rates;
 }
 
-fn update_rates(retry_count: u16) -> Result<(), ()> {
-    log::debug!("acquiring updated exchange rates");
+fn get_rates_from_fixer(fixer: &ConfigExchangeFixer) -> Result<HashMap<String, f32>, ()> {
+    log::debug!("acquiring exchange rates from Fixer");
 
-    // Acquire latest rates from Fixer
     let response = HTTP_CLIENT
         .get(&format!(
             "{}/latest?base={}",
-            &APP_CONF.exchange.fixer.endpoint, &APP_CONF.payout.currency
+            &fixer.endpoint, &APP_CONF.payout.currency
         ))
-        .header("apikey", &APP_CONF.exchange.fixer.api_key)
+        .header("apikey", &fixer.api_key)
         .send();
 
     if let Ok(response_inner) = response {
@@ -58,21 +59,74 @@ fn update_rates(retry_count: u16) -> Result<(), ()> {
 
         if status == StatusCode::OK {
             if let Ok(response_json) = response_inner.json::<FixerLatestResponse>() {
-                log::debug!("got updated exchange rates: {:?}", &response_json.rates);
-
-                store_rates(response_json.rates);
-
-                return Ok(());
-            } else {
-                log::error!("got invalid json when requesting updated exchange rates")
+                return Ok(response_json.rates);
             }
-        } else {
-            log::error!("got bad status code when requesting updated exchange rates")
         }
+    }
+    return Err(());
+}
+
+fn get_rates_from_currency_api(
+    api: &ConfigExchangeCurrencyAPI,
+) -> Result<HashMap<String, f32>, ()> {
+    log::debug!("acquiring exchange rates from Fixer");
+
+    let base_currency = &APP_CONF.payout.currency.to_lowercase();
+    let response = HTTP_CLIENT
+        .get(&format!(
+            "{}/currencies/{}.min.json",
+            &api.endpoint, base_currency
+        ))
+        .send();
+
+    if let Ok(response_inner) = response {
+        let status = response_inner.status();
+
+        log::debug!("status {:?} endpint {:?}", status, api.endpoint);
+        if status == StatusCode::OK {
+            log::debug!("received updated exchange rates");
+
+            if let Ok(json) =
+                response_inner.json::<serde_json::map::Map<String, serde_json::Value>>()
+            {
+                let value = json.get(base_currency);
+                if let Some(value) = value {
+                    return value.as_object().map_or(Ok(HashMap::default()), |o| {
+                        let mut rates = HashMap::new();
+                        for (k, v) in o.iter() {
+                            if let Some(v) = v.as_f64() {
+                                rates.insert(k.to_string(), v as f32);
+                            }
+                        }
+                        Ok(rates)
+                    });
+                }
+            }
+        }
+    }
+    return Err(());
+}
+
+fn update_rates(retry_count: u16) -> Result<(), ()> {
+    log::debug!("acquiring updated exchange rates");
+
+    let rates = if let Some(fixer) = &APP_CONF.exchange.fixer {
+        get_rates_from_fixer(fixer)
+    } else if let Some(api) = &APP_CONF.exchange.currency_api {
+        get_rates_from_currency_api(api)
     } else {
-        log::error!("could not request updated exchange rates");
+        Err(())
+    };
+
+    if let Ok(rates) = rates {
+        log::debug!("got updated exchange rates: {:?}", &rates);
+
+        store_rates(rates);
+
+        return Ok(());
     }
 
+    log::error!("could not request updated exchange rates");
     // Re-schedule an update after a few seconds? (if retry count not over limit)
     if retry_count <= RETRY_POLL_ATTEMPTS_LIMIT {
         log::info!(
@@ -118,7 +172,7 @@ pub fn run() {
     loop {
         log::debug!("running an exchange poll operation...");
 
-        // update_rates(0).ok();
+        update_rates(0).ok();
 
         log::info!("ran exchange poll operation");
 

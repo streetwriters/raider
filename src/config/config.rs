@@ -60,7 +60,14 @@ pub struct ConfigDatabase {
 
 #[derive(Deserialize)]
 pub struct ConfigExchange {
-    pub fixer: ConfigExchangeFixer,
+    pub fixer: Option<ConfigExchangeFixer>,
+    pub currency_api: Option<ConfigExchangeCurrencyAPI>,
+}
+
+#[derive(Deserialize)]
+pub struct ConfigExchangeCurrencyAPI {
+    #[serde(default = "defaults::exchange_currency_api_endpoint")]
+    pub endpoint: String,
 }
 
 #[derive(Deserialize)]

@@ -41,6 +41,10 @@ pub fn exchange_fixer_endpoint() -> String {
     "https://api.apilayer.com/fixer".to_string()
 }
 
+pub fn exchange_currency_api_endpoint() -> String {
+    "https://latest.currency-api.pages.dev/v1/".to_string()
+}
+
 pub fn email_smtp_host() -> String {
     "localhost".to_string()
 }

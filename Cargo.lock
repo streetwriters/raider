@@ -2138,6 +2138,7 @@ dependencies = [
  "separator",
  "serde",
  "serde_derive",
+ "serde_json",
  "sha2 0.7.1",
  "time 0.1.45",
  "toml 0.4.10",
