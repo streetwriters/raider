@@ -4,45 +4,32 @@
 // Copyright: 2018, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use std::collections::HashMap;
-
-use rocket;
-use rocket::config::{Config, Environment};
-use rocket_contrib::templates::Template;
-
 use super::{catchers, routes};
-use storage::db;
+use crate::storage::db;
+use rocket::{
+    config::{Config, SecretKey},
+    fairing::AdHoc,
+    Build, Rocket,
+};
+use rocket_dyn_templates::Template;
 
-use APP_CONF;
+use crate::APP_CONF;
 
-pub fn run() {
-    // Build Rocket configuration
-    let mut config = Config::build(Environment::Production)
-        .address(APP_CONF.server.inet.ip().to_string())
-        .port(APP_CONF.server.inet.port())
-        .workers(APP_CONF.server.workers)
-        .secret_key(APP_CONF.server.secret_key.as_str())
-        .finalize()
-        .unwrap();
-
-    // Append extra options
-    let mut extras = HashMap::new();
-
-    extras.insert(
-        "template_dir".to_string(),
-        APP_CONF
-            .assets
-            .path
-            .join("./templates")
-            .to_str()
-            .unwrap()
-            .into(),
-    );
-
-    config.set_extras(extras);
+pub fn run() -> Rocket<Build> {
+    let config = rocket::Config::figment()
+        .merge(("port", APP_CONF.server.inet.port()))
+        .merge(("address", APP_CONF.server.inet.ip()))
+        .merge(("workers", APP_CONF.server.workers))
+        .merge(("secret_key", APP_CONF.server.secret_key.as_str()))
+        .merge((
+            "template_dir",
+            APP_CONF.assets.path.join("./templates").to_str().unwrap(),
+        ));
 
     // Build and run Rocket instance
-    rocket::custom(config)
+    rocket::build()
+        .configure(config)
+        .attach(Template::fairing())
         .mount(
             "/",
             routes![
@@ -76,8 +63,6 @@ pub fn run() {
                 routes::post_management_account,
             ],
         )
-        .register(catchers![catchers::forbidden, catchers::gone,])
-        .attach(Template::fairing())
+        .register("/", catchers![catchers::forbidden, catchers::gone,])
         .manage(db::pool())
-        .launch();
 }

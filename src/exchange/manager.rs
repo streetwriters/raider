@@ -13,7 +13,7 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 
-use APP_CONF;
+use crate::APP_CONF;
 
 const POLL_RATE_SECONDS: u64 = 259200;
 const RETRY_POLL_SECONDS: u64 = 60;
@@ -118,7 +118,7 @@ pub fn run() {
     loop {
         log::debug!("running an exchange poll operation...");
 
-        update_rates(0).ok();
+        // update_rates(0).ok();
 
         log::info!("ran exchange poll operation");
 

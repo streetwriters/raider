@@ -13,35 +13,35 @@ use separator::FixedPlaceSeparatable;
 use std::cmp;
 
 use super::routes::DashboardPayoutsContextPayout;
-use notifier::email::EmailNotifier;
-use storage::db::DbConn;
-use storage::models::Payout;
-use storage::schemas::balance::dsl::{
+use crate::notifier::email::EmailNotifier;
+use crate::storage::db::DbConn;
+use crate::storage::models::Payout;
+use crate::storage::schemas::balance::dsl::{
     account_id as balance_account_id, amount as balance_amount, balance,
     released as balance_released,
 };
-use storage::schemas::payout::dsl::{
+use crate::storage::schemas::payout::dsl::{
     account_id as payout_account_id, created_at as payout_created_at, payout,
 };
-use APP_CONF;
+use crate::APP_CONF;
 
 const PAYOUTS_LIMIT_PER_PAGE: i64 = 20;
 
-pub fn get_balance(db: &DbConn, user_id: i32, released: Option<bool>) -> f32 {
+pub fn get_balance(db: &mut DbConn, user_id: i32, released: Option<bool>) -> f32 {
     let balance_result = if let Some(released_inner) = released {
         balance
             .filter(balance_account_id.eq(user_id))
             .filter(balance_released.eq(released_inner))
             .select(sum(balance_amount))
-            .first(&**db)
+            .first(&mut **db)
     } else {
         balance
             .filter(balance_account_id.eq(user_id))
             .select(sum(balance_amount))
-            .first(&**db)
+            .first(&mut **db)
     };
 
-    let balance_count: Option<f32> = balance_result.ok().and_then(|value: Option<BigDecimal>| {
+    let balance_count: Option<f32> = balance_result.ok().and_then(|value: Option<f64>| {
         if let Some(value_inner) = value {
             value_inner.to_f32()
         } else {
@@ -52,7 +52,7 @@ pub fn get_balance(db: &DbConn, user_id: i32, released: Option<bool>) -> f32 {
     balance_count.unwrap_or(0.0)
 }
 
-pub fn get_balance_string(db: &DbConn, user_id: i32, released: Option<bool>) -> String {
+pub fn get_balance_string(db: &mut DbConn, user_id: i32, released: Option<bool>) -> String {
     get_balance(db, user_id, released).separated_string_with_fixed_place(2)
 }
 
@@ -65,7 +65,7 @@ pub fn check_argument_value(argument: &Option<String>, against: &str) -> bool {
 }
 
 pub fn list_payouts(
-    db: &DbConn,
+    db: &mut DbConn,
     user_id: i32,
     page_number: u16,
 ) -> (Vec<DashboardPayoutsContextPayout>, bool) {
@@ -77,7 +77,7 @@ pub fn list_payouts(
         .order(payout_created_at.desc())
         .limit(PAYOUTS_LIMIT_PER_PAGE + 1)
         .offset(paging_to_offset(page_number, PAYOUTS_LIMIT_PER_PAGE))
-        .load::<Payout>(&**db)
+        .load::<Payout>(&mut **db)
         .map(|results| {
             for (index, result) in results.into_iter().enumerate() {
                 if (index as i64) < PAYOUTS_LIMIT_PER_PAGE {

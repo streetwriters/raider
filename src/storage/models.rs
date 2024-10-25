@@ -9,14 +9,14 @@ use chrono::naive::NaiveDateTime;
 
 use super::schemas::{account, balance, payout, tracker};
 
-#[derive(Identifiable, Queryable, Associations, Debug)]
-#[table_name = "account"]
+#[derive(Identifiable, Queryable, Debug)]
+#[diesel(table_name = account)]
 pub struct Account {
     pub id: i32,
     pub email: String,
     pub password: Vec<u8>,
     pub recovery: Option<Vec<u8>>,
-    pub commission: BigDecimal,
+    pub commission: f64,
     pub full_name: Option<String>,
     pub address: Option<String>,
     pub country: Option<String>,
@@ -28,10 +28,11 @@ pub struct Account {
 }
 
 #[derive(Identifiable, Queryable, Associations, Debug)]
-#[table_name = "balance"]
+#[diesel(belongs_to(Account), belongs_to(Tracker))]
+#[diesel(table_name = balance)]
 pub struct Balance {
     pub id: i32,
-    pub amount: BigDecimal,
+    pub amount: f64,
     pub currency: String,
     pub released: bool,
     pub trace: Option<String>,
@@ -42,11 +43,12 @@ pub struct Balance {
 }
 
 #[derive(Identifiable, Queryable, Associations, Debug)]
-#[table_name = "payout"]
+#[diesel(belongs_to(Account))]
+#[diesel(table_name = payout)]
 pub struct Payout {
     pub id: i32,
     pub number: i32,
-    pub amount: BigDecimal,
+    pub amount: f64,
     pub currency: String,
     pub status: String,
     pub account: Option<String>,
@@ -57,7 +59,8 @@ pub struct Payout {
 }
 
 #[derive(Identifiable, Queryable, Associations, Debug)]
-#[table_name = "tracker"]
+#[diesel(belongs_to(Account))]
+#[diesel(table_name = tracker)]
 pub struct Tracker {
     pub id: String,
     pub label: String,
@@ -68,7 +71,7 @@ pub struct Tracker {
 }
 
 #[derive(AsChangeset)]
-#[table_name = "account"]
+#[diesel(table_name = account)]
 pub struct AccountRecoveryUpdate {
     pub recovery: Vec<u8>,
 }

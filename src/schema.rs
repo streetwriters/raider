@@ -1,20 +1,16 @@
-// Raider
-//
-// Affiliates dashboard
-// Copyright: 2018, Valerian Saliou <valerian@valeriansaliou.name>
-// License: Mozilla Public License v2.0 (MPL v2.0)
+// @generated automatically by Diesel CLI.
 
-table! {
+diesel::table! {
     account (id) {
         id -> Integer,
-        email -> Varchar,
+        email -> Text,
         password -> Binary,
         recovery -> Nullable<Binary>,
         commission -> Double,
-        full_name -> Nullable<Varchar>,
-        address -> Nullable<Varchar>,
-        country -> Nullable<Varchar>,
-        payout_method -> Nullable<Varchar>,
+        full_name -> Nullable<Text>,
+        address -> Nullable<Text>,
+        country -> Nullable<Text>,
+        payout_method -> Nullable<Text>,
         payout_instructions -> Nullable<Text>,
         notify_balance -> Bool,
         created_at -> Timestamp,
@@ -22,39 +18,39 @@ table! {
     }
 }
 
-table! {
+diesel::table! {
     balance (id) {
         id -> Integer,
         amount -> Double,
-        currency -> VarChar,
+        currency -> Text,
         released -> Bool,
         trace -> Nullable<Text>,
         account_id -> Integer,
-        tracker_id -> Nullable<VarChar>,
+        tracker_id -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
 }
 
-table! {
+diesel::table! {
     payout (id) {
         id -> Integer,
         number -> Integer,
         amount -> Double,
-        currency -> VarChar,
-        status -> VarChar,
-        account -> Nullable<VarChar>,
-        invoice_url -> Nullable<VarChar>,
+        currency -> Text,
+        status -> Text,
+        account -> Nullable<Text>,
+        invoice_url -> Nullable<Text>,
         account_id -> Integer,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
 }
 
-table! {
+diesel::table! {
     tracker (id) {
-        id -> VarChar,
-        label -> VarChar,
+        id -> Text,
+        label -> Text,
         statistics_signups -> Integer,
         account_id -> Integer,
         created_at -> Timestamp,
@@ -62,9 +58,14 @@ table! {
     }
 }
 
-joinable!(balance -> account(account_id));
-joinable!(balance -> tracker(tracker_id));
-joinable!(payout -> account(account_id));
-joinable!(tracker -> account(account_id));
+diesel::joinable!(balance -> account (account_id));
+diesel::joinable!(balance -> tracker (tracker_id));
+diesel::joinable!(payout -> account (account_id));
+diesel::joinable!(tracker -> account (account_id));
 
-allow_tables_to_appear_in_same_query!(account, tracker);
+diesel::allow_tables_to_appear_in_same_query!(
+    account,
+    balance,
+    payout,
+    tracker,
+);

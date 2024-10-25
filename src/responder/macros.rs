@@ -40,23 +40,24 @@ macro_rules! gen_auth_guard {
             }
         }
 
-        impl<'a, 'r> FromRequest<'a, 'r> for $name {
+        #[rocket::async_trait]
+        impl<'a> FromRequest<'a> for $name {
             type Error = ();
 
-            fn from_request(request: &'a Request<'r>) -> request::Outcome<$name, ()> {
+            async fn from_request(request: &'a Request<'_>) -> request::Outcome<$name, ()> {
                 if let Some(authorization_value) = request.headers().get_one("authorization") {
                     match Authorization::parse_from("Basic", authorization_value) {
                         Ok(authorization) => {
                             if authorization.password == $token {
                                 Outcome::Success($name)
                             } else {
-                                Outcome::Failure((Status::Unauthorized, ()))
+                                Outcome::Error((Status::Unauthorized, ()))
                             }
                         }
-                        Err(_) => Outcome::Failure((Status::BadRequest, ())),
+                        Err(_) => Outcome::Error((Status::BadRequest, ())),
                     }
                 } else {
-                    Outcome::Failure((Status::Unauthorized, ()))
+                    Outcome::Error((Status::Unauthorized, ()))
                 }
             }
         }

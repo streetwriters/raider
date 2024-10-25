@@ -13,21 +13,21 @@ use num_traits::ToPrimitive;
 use separator::FixedPlaceSeparatable;
 use std::thread;
 
-use exchange::manager::normalize as exchange_normalize;
-use notifier::email::EmailNotifier;
-use storage::db::DbConn;
-use storage::models::{Account, Tracker};
-use storage::schemas::account::dsl::account;
-use storage::schemas::balance::dsl::{
+use crate::exchange::manager::normalize as exchange_normalize;
+use crate::notifier::email::EmailNotifier;
+use crate::storage::db::DbConn;
+use crate::storage::models::{Account, Tracker};
+use crate::storage::schemas::account::dsl::account;
+use crate::storage::schemas::balance::dsl::{
     account_id as balance_account_id, amount as balance_amount, balance,
     created_at as balance_created_at, currency as balance_currency, trace as balance_trace,
     tracker_id as balance_tracker_id, updated_at as balance_updated_at,
 };
-use storage::schemas::tracker::dsl::{
+use crate::storage::schemas::tracker::dsl::{
     id as tracker_id, statistics_signups as tracker_statistics_signups, tracker,
     updated_at as tracker_updated_at,
 };
-use APP_CONF;
+use crate::APP_CONF;
 
 pub enum HandlePaymentError {
     InvalidAmount,
@@ -40,7 +40,7 @@ pub enum HandleSignupError {
 }
 
 pub fn handle_payment(
-    db: &DbConn,
+    db: &mut DbConn,
     tracking_id: &str,
     amount_real: f32,
     currency: &str,
@@ -77,7 +77,7 @@ pub fn handle_payment(
         let track_result = tracker
             .filter(tracker_id.eq(tracking_id))
             .inner_join(account)
-            .first::<(Tracker, Account)>(&**db);
+            .first::<(Tracker, Account)>(&mut **db);
 
         if let Ok(track_inner) = track_result {
             // Apply user commission percentage to amount
@@ -88,7 +88,7 @@ pub fn handle_payment(
 
                 let insert_result = diesel::insert_into(balance)
                     .values((
-                        &balance_amount.eq(BigDecimal::from(commission_amount)),
+                        &balance_amount.eq(commission_amount as f64),
                         &balance_currency.eq(&APP_CONF.payout.currency),
                         &balance_trace.eq(trace),
                         &balance_account_id.eq(&track_inner.1.id),
@@ -96,7 +96,7 @@ pub fn handle_payment(
                         &balance_created_at.eq(&now_date),
                         &balance_updated_at.eq(&now_date),
                     ))
-                    .execute(&**db);
+                    .execute(&mut **db);
 
                 if insert_result.is_ok() == true {
                     return Ok(Some((
@@ -123,13 +123,13 @@ pub fn handle_payment(
     }
 }
 
-pub fn handle_signup(db: &DbConn, tracking_id: &str) -> Result<(), HandleSignupError> {
+pub fn handle_signup(db: &mut DbConn, tracking_id: &str) -> Result<(), HandleSignupError> {
     log::debug!("signup track handle: {}", tracking_id);
 
     // Resolve tracking code
     let tracker_result = tracker
         .filter(tracker_id.eq(tracking_id))
-        .first::<Tracker>(&**db);
+        .first::<Tracker>(&mut **db);
 
     if let Ok(tracker_inner) = tracker_result {
         // Notice: this increment is not atomic; thus it is not 100% safe. We do this for \
@@ -139,7 +139,7 @@ pub fn handle_signup(db: &DbConn, tracking_id: &str) -> Result<(), HandleSignupE
                 tracker_statistics_signups.eq(tracker_inner.statistics_signups + 1),
                 tracker_updated_at.eq(Utc::now().naive_utc()),
             ))
-            .execute(&**db);
+            .execute(&mut **db);
 
         if update_result.is_ok() == true {
             return Ok(());

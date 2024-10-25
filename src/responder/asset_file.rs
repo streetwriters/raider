@@ -4,14 +4,15 @@
 // Copyright: 2018, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
+use chrono::Utc;
 use std::fs::File;
 use std::io;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use time::{self, Duration};
 
-use rocket::http::hyper::header::{CacheControl, CacheDirective, Expires, HttpDate};
-use rocket::http::ContentType;
+use rocket::http::hyper::header::{CACHE_CONTROL, EXPIRES};
+use rocket::http::{ContentType, Header};
 use rocket::request::Request;
 use rocket::response::{self, Responder};
 
@@ -49,19 +50,18 @@ impl AssetFile {
     }
 }
 
-impl<'r> Responder<'r> for AssetFile {
-    fn respond_to(self, req: &Request) -> response::Result<'r> {
+impl<'r> Responder<'r, 'static> for AssetFile {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
         let mut response = self.1.respond_to(req)?;
 
         // Set cache headers
-        response.set_header(CacheControl(vec![
-            CacheDirective::Public,
-            CacheDirective::MaxAge(ASSETS_EXPIRE_SECONDS),
-        ]));
+        response.set_header(Header::new(
+            "Cache-Control",
+            format!("public, max-age={}", ASSETS_EXPIRE_SECONDS),
+        ));
 
-        response.set_header(Expires(HttpDate(
-            time::now() + Duration::seconds(ASSETS_EXPIRE_SECONDS as i64),
-        )));
+        let expires_time = time::now() + Duration::seconds(ASSETS_EXPIRE_SECONDS as i64);
+        response.set_header(Header::new("Expires", expires_time.rfc822().to_string()));
 
         // Set content type header?
         if let Some(ext) = self.0.extension() {

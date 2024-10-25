@@ -7,8 +7,8 @@
 use separator::FixedPlaceSeparatable;
 use url_serde::SerdeUrl;
 
-use config::config::ConfigTrackerBanner;
-use APP_CONF;
+use crate::config::config::ConfigTrackerBanner;
+use crate::APP_CONF;
 
 const LOGO_EXTENSION_SPLIT_SPAN: usize = 4;
 

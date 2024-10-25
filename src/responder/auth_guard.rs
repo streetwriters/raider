@@ -6,12 +6,12 @@
 
 use log;
 use rand::{self, Rng};
-use rocket::http::{Cookie, Cookies, Status};
+use rocket::http::{Cookie, CookieJar, Status};
+use rocket::request::Outcome;
 use rocket::request::{self, FromRequest, Request};
-use rocket::Outcome;
 use sha2::{Digest, Sha256};
 
-use APP_CONF;
+use crate::APP_CONF;
 
 pub struct AuthGuard(pub i32);
 pub struct AuthAnonymousGuard;
@@ -21,12 +21,13 @@ const PASSWORD_MAXIMUM_LENGTH: usize = 200;
 
 pub static AUTH_USER_COOKIE_NAME: &'static str = "user_id";
 
-impl<'a, 'r> FromRequest<'a, 'r> for AuthGuard {
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for AuthGuard {
     type Error = ();
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<AuthGuard, ()> {
-        if let Outcome::Success(cookies) = request.guard::<Cookies>() {
-            if let Some(user_id_cookie) = read(cookies) {
+    async fn from_request(request: &'r Request<'_>) -> request::Outcome<AuthGuard, ()> {
+        if let Outcome::Success(cookies) = request.guard::<&CookieJar>().await {
+            if let Some(user_id_cookie) = read(cookies.clone()) {
                 if let Ok(user_id) = user_id_cookie.value().parse::<i32>() {
                     log::debug!("got user_id from cookies: {}", &user_id);
 
@@ -35,30 +36,31 @@ impl<'a, 'r> FromRequest<'a, 'r> for AuthGuard {
             }
         }
 
-        Outcome::Failure((Status::Forbidden, ()))
+        Outcome::Error((Status::Forbidden, ()))
     }
 }
 
-impl<'a, 'r> FromRequest<'a, 'r> for AuthAnonymousGuard {
+#[rocket::async_trait]
+impl<'a> FromRequest<'a> for AuthAnonymousGuard {
     type Error = ();
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<AuthAnonymousGuard, ()> {
-        match request.guard::<AuthGuard>() {
-            Outcome::Success(_) => Outcome::Failure((Status::Gone, ())),
+    async fn from_request(request: &'a Request<'_>) -> request::Outcome<AuthAnonymousGuard, ()> {
+        match request.guard::<AuthGuard>().await {
+            Outcome::Success(_) => Outcome::Error((Status::Gone, ())),
             _ => Outcome::Success(AuthAnonymousGuard),
         }
     }
 }
 
-pub fn insert(mut cookies: Cookies, user_id: String) {
+pub fn insert(cookies: &CookieJar, user_id: String) {
     cookies.add_private(Cookie::new(AUTH_USER_COOKIE_NAME, user_id));
 }
 
-pub fn cleanup(mut cookies: Cookies) {
+pub fn cleanup(cookies: CookieJar) {
     cookies.remove_private(Cookie::named(AUTH_USER_COOKIE_NAME));
 }
 
-fn read(mut cookies: Cookies) -> Option<Cookie> {
+fn read(cookies: CookieJar) -> Option<Cookie> {
     cookies.get_private(AUTH_USER_COOKIE_NAME)
 }
 

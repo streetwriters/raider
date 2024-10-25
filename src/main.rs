@@ -4,7 +4,7 @@
 // Copyright: 2018, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-#![feature(proc_macro_hygiene, decl_macro)]
+// #![feature(proc_macro_hygiene, decl_macro)]
 
 #[macro_use(log)]
 extern crate log;
@@ -28,10 +28,9 @@ extern crate native_tls;
 extern crate num_traits;
 extern crate openssl_probe;
 extern crate r2d2;
-extern crate r2d2_diesel;
 extern crate rand;
 extern crate reqwest;
-extern crate rocket_contrib;
+extern crate rocket_dyn_templates;
 extern crate separator;
 extern crate sha2;
 extern crate time;
@@ -108,12 +107,12 @@ gen_spawn_managed!(
     THREAD_NAME_EXCHANGE,
     run_exchange
 );
-gen_spawn_managed!(
-    "responder",
-    spawn_responder,
-    THREAD_NAME_RESPONDER,
-    run_responder
-);
+// gen_spawn_managed!(
+//     "responder",
+//     spawn_responder,
+//     THREAD_NAME_RESPONDER,
+//     run_responder
+// );
 
 fn make_app_args() -> AppArgs {
     let matches = App::new(crate_name!())
@@ -149,8 +148,13 @@ fn ensure_states() {
     );
 }
 
-fn main() {
-    // Ensure OpenSSL root chain is found on current environment
+// fn main() {
+
+// }
+
+#[launch]
+fn rocket() -> _ {
+    // // Ensure OpenSSL root chain is found on current environment
     openssl_probe::init_ssl_cert_env_vars();
 
     // Initialize shared logger
@@ -163,11 +167,9 @@ fn main() {
     // Ensure all states are bound
     ensure_states();
 
-    // Spawn exchange (background thread)
-    thread::spawn(spawn_exchange);
+    // // Spawn exchange (background thread)
+    // thread::spawn(spawn_exchange);
 
     // Spawn Web responder (foreground thread)
-    spawn_responder();
-
-    log::error!("could not start");
+    run_responder()
 }

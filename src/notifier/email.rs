@@ -13,7 +13,7 @@ use log;
 use native_tls::TlsConnector;
 use std::time::Duration;
 
-use APP_CONF;
+use crate::APP_CONF;
 
 pub struct EmailNotifier;
 

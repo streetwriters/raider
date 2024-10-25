@@ -8,17 +8,18 @@ use bigdecimal::BigDecimal;
 use chrono::offset::Utc;
 use diesel;
 use diesel::prelude::*;
+use num_traits::FromPrimitive;
 use validate::rules::email as validate_email;
 
-use notifier::email::EmailNotifier;
-use responder::auth_guard::password_generate as auth_password_generate;
-use storage::db::DbConn;
-use storage::schemas::account::dsl::{
+use crate::notifier::email::EmailNotifier;
+use crate::responder::auth_guard::password_generate as auth_password_generate;
+use crate::storage::db::DbConn;
+use crate::storage::schemas::account::dsl::{
     account, address as account_address, commission as account_commission,
     country as account_country, created_at as account_created_at, email as account_email,
     full_name as account_full_name, password as account_password, updated_at as account_updated_at,
 };
-use APP_CONF;
+use crate::APP_CONF;
 
 pub enum HandleAccountError {
     Aborted,
@@ -27,7 +28,7 @@ pub enum HandleAccountError {
 }
 
 pub fn handle_account(
-    db: &DbConn,
+    db: &mut DbConn,
     email: &str,
     full_name: &Option<String>,
     address: &Option<String>,
@@ -50,11 +51,11 @@ pub fn handle_account(
                 &account_full_name.eq(full_name),
                 &account_address.eq(address),
                 &account_country.eq(country),
-                &account_commission.eq(BigDecimal::from(APP_CONF.tracker.commission_default)),
+                &account_commission.eq(APP_CONF.tracker.commission_default as f64),
                 &account_created_at.eq(&now_date),
                 &account_updated_at.eq(&now_date),
             ))
-            .execute(&**db);
+            .execute(&mut **db);
 
         if insert_result.is_ok() == true {
             log::debug!(

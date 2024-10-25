@@ -13,11 +13,11 @@ use iso_country::data::all as countries;
 use log;
 use num_traits::cast::ToPrimitive;
 use rand::{self, Rng};
-use rocket::http::{Cookies, Status};
-use rocket::request::{Form, FormItems, FromForm, FromFormValue};
+use rocket::form::{Form, FromForm};
+use rocket::http::{CookieJar, Status};
 use rocket::response::Redirect;
-use rocket_contrib::json::Json;
-use rocket_contrib::templates::Template;
+use rocket::serde::json::Json;
+use rocket_dyn_templates::Template;
 use separator::{FixedPlaceSeparatable, Separatable};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -35,14 +35,14 @@ use super::track_guard::TrackGuard;
 use super::utilities::{
     check_argument_value, get_balance, get_balance_string, list_payouts, send_payout_emails,
 };
-use management::account::{
+use crate::management::account::{
     handle_account as management_handle_account, HandleAccountError as ManagementHandleAccountError,
 };
-use notifier::email::EmailNotifier;
-use storage::choices::ACCOUNT_PAYOUT_METHODS;
-use storage::db::DbConn;
-use storage::models::{Account, AccountRecoveryUpdate, Tracker};
-use storage::schemas::account::dsl::{
+use crate::notifier::email::EmailNotifier;
+use crate::storage::choices::ACCOUNT_PAYOUT_METHODS;
+use crate::storage::db::DbConn;
+use crate::storage::models::{Account, AccountRecoveryUpdate, Tracker};
+use crate::storage::schemas::account::dsl::{
     account, address as account_address, commission as account_commission,
     country as account_country, created_at as account_created_at, email as account_email,
     full_name as account_full_name, id as account_id, notify_balance as account_notify_balance,
@@ -50,26 +50,26 @@ use storage::schemas::account::dsl::{
     payout_method as account_payout_method, recovery as account_recovery,
     updated_at as account_updated_at,
 };
-use storage::schemas::balance::dsl::{
+use crate::storage::schemas::balance::dsl::{
     account_id as balance_account_id, amount as balance_amount, balance,
     released as balance_released, tracker_id as balance_tracker_id,
     updated_at as balance_updated_at,
 };
-use storage::schemas::payout::dsl::{
+use crate::storage::schemas::payout::dsl::{
     account_id as payout_account_id, amount as payout_amount, created_at as payout_created_at,
     currency as payout_currency, id as payout_id, number as payout_number, payout,
     updated_at as payout_updated_at,
 };
-use storage::schemas::tracker::dsl::{
+use crate::storage::schemas::tracker::dsl::{
     account_id as tracker_account_id, created_at as tracker_created_at, id as tracker_id,
     label as tracker_label, tracker, updated_at as tracker_updated_at,
 };
-use track::payment::{
+use crate::track::payment::{
     handle_payment as track_handle_payment, handle_signup as track_handle_signup,
     run_notify_payment as track_run_notify_payment, HandlePaymentError as TrackHandlePaymentError,
     HandleSignupError as TrackHandleSignupError,
 };
-use APP_CONF;
+use crate::APP_CONF;
 
 #[derive(FromForm)]
 pub struct InitiateArgs {
@@ -119,8 +119,9 @@ pub struct DashboardTrackersFormCreateData {
     name: String,
 }
 
+#[derive(FromForm)]
 pub struct DashboardTrackersFormRemoveData {
-    trackers: HashSet<String>,
+    trackers: Vec<String>,
 }
 
 #[derive(FromForm)]
@@ -254,35 +255,35 @@ pub struct DashboardAccountContextPayout {
 const TRACKERS_PER_ACCOUNT_MAXIMUM: i64 = 100;
 
 impl DashboardCommonContext {
-    fn build(db: &DbConn, user_id: i32) -> DashboardCommonContext {
+    fn build(db: &mut DbConn, user_id: i32) -> DashboardCommonContext {
         DashboardCommonContext {
             balance_pending: get_balance_string(db, user_id, Some(false)),
         }
     }
 }
 
-impl<'f> FromForm<'f> for DashboardTrackersFormRemoveData {
-    type Error = ();
+// impl<'f> FromForm<'f> for DashboardTrackersFormRemoveData {
+//     type Error = ();
 
-    fn from_form(form_items: &mut FormItems<'f>, _: bool) -> Result<Self, Self::Error> {
-        let mut update = DashboardTrackersFormRemoveData {
-            trackers: HashSet::new(),
-        };
+//     fn from_form(form_items: &mut FormItems<'f>, _: bool) -> Result<Self, ()> {
+//         let mut update = DashboardTrackersFormRemoveData {
+//             trackers: HashSet::new(),
+//         };
 
-        for form_item in form_items {
-            let value = String::from_form_value(form_item.value).or(Err(()))?;
+//         for form_item in form_items {
+//             let value = String::from_form_value(form_item.value).or(Err(()))?;
 
-            match form_item.key.as_str() {
-                "tracker" => update.trackers.insert(value),
-                _ => {
-                    return Err(());
-                }
-            };
-        }
+//             match form_item.key.as_str() {
+//                 "tracker" => update.trackers.insert(value),
+//                 _ => {
+//                     return Err(());
+//                 }
+//             };
+//         }
 
-        Ok(update)
-    }
-}
+//         Ok(update)
+//     }
+// }
 
 #[get("/")]
 pub fn get_index(_anon: AuthAnonymousGuard) -> Redirect {
@@ -295,7 +296,7 @@ pub fn get_initiate_base(_anon: AuthAnonymousGuard) -> Redirect {
 }
 
 #[get("/initiate/login?<args..>")]
-pub fn get_initiate_login(_anon: AuthAnonymousGuard, args: Form<InitiateArgs>) -> Template {
+pub fn get_initiate_login(_anon: AuthAnonymousGuard, args: InitiateArgs) -> Template {
     Template::render(
         "initiate_login",
         &LoginContext {
@@ -308,8 +309,8 @@ pub fn get_initiate_login(_anon: AuthAnonymousGuard, args: Form<InitiateArgs>) -
 #[post("/initiate/login/form/login", data = "<data>")]
 pub fn post_initiate_login_form_login(
     _anon: AuthAnonymousGuard,
-    cookies: Cookies,
-    db: DbConn,
+    cookies: &CookieJar,
+    mut db: DbConn,
     data: Form<LoginData>,
 ) -> Redirect {
     if data.email.is_empty() == false
@@ -319,7 +320,7 @@ pub fn post_initiate_login_form_login(
     {
         let account_result = account
             .filter(account_email.eq(&data.email))
-            .first::<Account>(&*db);
+            .first::<Account>(&mut *db);
 
         match account_result {
             Ok(result) => {
@@ -341,7 +342,7 @@ pub fn post_initiate_login_form_login(
                                 .set(&AccountRecoveryUpdate {
                                     recovery: Vec::new(),
                                 })
-                                .execute(&*db);
+                                .execute(&mut *db);
 
                         match recovery_update {
                             Ok(_) => log::info!("cleared recovery password"),
@@ -367,7 +368,7 @@ pub fn post_initiate_login_form_login(
 #[get("/initiate/signup?<args..>")]
 pub fn get_initiate_signup(
     _anon: AuthAnonymousGuard,
-    args: Form<InitiateArgs>,
+    args: InitiateArgs,
 ) -> Result<Template, Status> {
     if APP_CONF.database.account_create_allow == true {
         Ok(Template::render(
@@ -385,8 +386,8 @@ pub fn get_initiate_signup(
 #[post("/initiate/signup/form/signup", data = "<data>")]
 pub fn post_initiate_signup_form_signup(
     _anon: AuthAnonymousGuard,
-    cookies: Cookies,
-    db: DbConn,
+    cookies: &CookieJar,
+    mut db: DbConn,
     data: Form<SignupData>,
 ) -> Result<Redirect, Status> {
     if APP_CONF.database.account_create_allow == true {
@@ -402,17 +403,20 @@ pub fn post_initiate_signup_form_signup(
                 .values((
                     &account_email.eq(&data.email),
                     &account_password.eq(&auth_password_encode(&data.password)),
-                    &account_commission.eq(BigDecimal::from(APP_CONF.tracker.commission_default)),
+                    &account_commission.eq(APP_CONF.tracker.commission_default as f64),
                     &account_created_at.eq(&now_date),
                     &account_updated_at.eq(&now_date),
                 ))
-                .execute(&*db);
+                .execute(&mut *db);
+
+            log::debug!("account created {:?}", insert_result);
 
             if insert_result.is_ok() == true {
                 let account_result = account
                     .filter(account_email.eq(&data.email))
-                    .first::<Account>(&*db);
+                    .first::<Account>(&mut *db);
 
+                log::debug!("account: {:?}", account_result);
                 match account_result {
                     Ok(result) => {
                         // Log-in user (set cookie)
@@ -434,7 +438,7 @@ pub fn post_initiate_signup_form_signup(
 }
 
 #[get("/initiate/recover?<args..>")]
-pub fn get_initiate_recover(_anon: AuthAnonymousGuard, args: Form<InitiateArgs>) -> Template {
+pub fn get_initiate_recover(_anon: AuthAnonymousGuard, args: InitiateArgs) -> Template {
     Template::render(
         "initiate_recover",
         &RecoverContext {
@@ -448,20 +452,20 @@ pub fn get_initiate_recover(_anon: AuthAnonymousGuard, args: Form<InitiateArgs>)
 #[post("/initiate/recover/form/recover", data = "<data>")]
 pub fn post_initiate_recover_form_recover(
     _anon: AuthAnonymousGuard,
-    db: DbConn,
+    mut db: DbConn,
     data: Form<RecoverData>,
 ) -> Redirect {
     if data.email.is_empty() == false && validate_email().validate(&data.email).is_ok() == true {
         let result = account
             .filter(account_email.eq(&data.email))
-            .first::<Account>(&*db);
+            .first::<Account>(&mut *db);
 
         if let Ok(account_result) = result {
             let recovery_params = auth_recovery_generate();
 
             let recovery_result = diesel::update(account.filter(account_id.eq(account_result.id)))
                 .set(account_recovery.eq(Some(&recovery_params.0)))
-                .execute(&*db);
+                .execute(&mut *db);
 
             if recovery_result.is_ok() == true {
                 log::debug!(
@@ -508,18 +512,18 @@ pub fn post_initiate_recover_form_recover(
 }
 
 #[get("/initiate/logout")]
-pub fn get_initiate_logout(_auth: AuthGuard, cookies: Cookies) -> Redirect {
-    auth_cleanup(cookies);
+pub fn get_initiate_logout(_auth: AuthGuard, cookies: &CookieJar) -> Redirect {
+    auth_cleanup(cookies.clone());
 
     Redirect::to("/initiate/")
 }
 
 #[get("/dashboard")]
-pub fn get_dashboard_base(auth: AuthGuard, db: DbConn) -> Redirect {
+pub fn get_dashboard_base(auth: AuthGuard, mut db: DbConn) -> Redirect {
     let tracker_count_result = tracker
         .filter(tracker_account_id.eq(auth.0))
         .select(count(tracker_id))
-        .first(&*db);
+        .first(&mut *db);
 
     if tracker_count_result.unwrap_or(0) > 0 {
         Redirect::to("/dashboard/trackers/")
@@ -529,13 +533,15 @@ pub fn get_dashboard_base(auth: AuthGuard, db: DbConn) -> Redirect {
 }
 
 #[get("/dashboard/welcome")]
-pub fn get_dashboard_welcome(auth: AuthGuard, db: DbConn) -> Template {
-    let account_result = account.filter(account_id.eq(auth.0)).first::<Account>(&*db);
+pub fn get_dashboard_welcome(auth: AuthGuard, mut db: DbConn) -> Template {
+    let account_result = account
+        .filter(account_id.eq(auth.0))
+        .first::<Account>(&mut *db);
 
     let tracker_count_result = tracker
         .filter(tracker_account_id.eq(auth.0))
         .select(count(tracker_id))
-        .first(&*db);
+        .first(&mut *db);
 
     let commission_value = if let Ok(account_inner) = account_result {
         account_inner.commission.to_f32().unwrap_or(0.00)
@@ -546,7 +552,7 @@ pub fn get_dashboard_welcome(auth: AuthGuard, db: DbConn) -> Template {
     Template::render(
         "dashboard_welcome",
         &DashboardBaseContext {
-            common: DashboardCommonContext::build(&db, auth.0),
+            common: DashboardCommonContext::build(&mut db, auth.0),
             config: &CONFIG_CONTEXT,
             has_trackers: tracker_count_result.unwrap_or(0) > 0,
             commission_percent: (commission_value * 100.0) as u8,
@@ -555,13 +561,13 @@ pub fn get_dashboard_welcome(auth: AuthGuard, db: DbConn) -> Template {
 }
 
 #[get("/dashboard/trackers?<args..>")]
-pub fn get_dashboard_trackers(auth: AuthGuard, db: DbConn, args: Form<DashboardArgs>) -> Template {
+pub fn get_dashboard_trackers(auth: AuthGuard, mut db: DbConn, args: DashboardArgs) -> Template {
     let mut trackers = Vec::new();
 
     tracker
         .filter(tracker_account_id.eq(auth.0))
         .order(tracker_label.asc())
-        .load::<Tracker>(&*db)
+        .load::<Tracker>(&mut *db)
         .map(|results| {
             for result in results {
                 log::debug!("got tracker: {:?}", result);
@@ -570,9 +576,9 @@ pub fn get_dashboard_trackers(auth: AuthGuard, db: DbConn, args: Form<DashboardA
                     .filter(balance_account_id.eq(auth.0))
                     .filter(balance_tracker_id.eq(&result.id))
                     .select(sum(balance_amount))
-                    .first(&*db)
+                    .first(&mut *db)
                     .ok()
-                    .and_then(|value: Option<BigDecimal>| {
+                    .and_then(|value: Option<f64>| {
                         if let Some(value_inner) = value {
                             value_inner.to_f32()
                         } else {
@@ -601,7 +607,7 @@ pub fn get_dashboard_trackers(auth: AuthGuard, db: DbConn, args: Form<DashboardA
             remove_neutral: check_argument_value(&args.result, "remove_neutral"),
             remove_success: check_argument_value(&args.result, "remove_success"),
             trackers: trackers,
-            common: DashboardCommonContext::build(&db, auth.0),
+            common: DashboardCommonContext::build(&mut db, auth.0),
             config: &CONFIG_CONTEXT,
         },
     )
@@ -610,7 +616,7 @@ pub fn get_dashboard_trackers(auth: AuthGuard, db: DbConn, args: Form<DashboardA
 #[post("/dashboard/trackers/form/create", data = "<data>")]
 pub fn post_dashboard_trackers_form_create(
     auth: AuthGuard,
-    db: DbConn,
+    mut db: DbConn,
     data: Form<DashboardTrackersFormCreateData>,
 ) -> Redirect {
     let now_date = Utc::now().naive_utc();
@@ -622,7 +628,7 @@ pub fn post_dashboard_trackers_form_create(
     let trackers_total = tracker
         .filter(tracker_account_id.eq(auth.0))
         .select(count(tracker_id))
-        .first(&*db)
+        .first(&mut *db)
         .unwrap_or(0);
 
     let insert_result = if trackers_total < TRACKERS_PER_ACCOUNT_MAXIMUM {
@@ -634,7 +640,7 @@ pub fn post_dashboard_trackers_form_create(
                 &tracker_created_at.eq(&now_date),
                 &tracker_updated_at.eq(&now_date),
             ))
-            .execute(&*db)
+            .execute(&mut *db)
             .or(Err(()));
 
         log::debug!(
@@ -662,7 +668,7 @@ pub fn post_dashboard_trackers_form_create(
 #[post("/dashboard/trackers/form/remove", data = "<data>")]
 pub fn post_dashboard_trackers_form_remove(
     auth: AuthGuard,
-    db: DbConn,
+    mut db: DbConn,
     data: Form<DashboardTrackersFormRemoveData>,
 ) -> Redirect {
     let delete_result = diesel::delete(
@@ -670,7 +676,7 @@ pub fn post_dashboard_trackers_form_remove(
             .filter(tracker_account_id.eq(auth.0))
             .filter(tracker_id.eq_any(&data.trackers)),
     )
-    .execute(&*db);
+    .execute(&mut *db);
 
     let count_updated = delete_result.as_ref().unwrap_or(&0);
 
@@ -693,14 +699,14 @@ pub fn post_dashboard_trackers_form_remove(
 }
 
 #[get("/dashboard/payouts?<args..>")]
-pub fn get_dashboard_payouts(auth: AuthGuard, db: DbConn, args: Form<DashboardArgs>) -> Template {
+pub fn get_dashboard_payouts(auth: AuthGuard, mut db: DbConn, args: DashboardArgs) -> Template {
     let payouts_total = payout
         .filter(payout_account_id.eq(auth.0))
         .select(count(payout_id))
-        .first(&*db)
+        .first(&mut *db)
         .unwrap_or(0);
 
-    let (payouts, has_more) = list_payouts(&db, auth.0, 1);
+    let (payouts, has_more) = list_payouts(&mut db, auth.0, 1);
 
     Template::render(
         "dashboard_payouts",
@@ -710,9 +716,9 @@ pub fn get_dashboard_payouts(auth: AuthGuard, db: DbConn, args: Form<DashboardAr
             amount_failure: check_argument_value(&args.result, "amount_failure"),
             amount_neutral: check_argument_value(&args.result, "amount_neutral"),
             config_failure: check_argument_value(&args.result, "config_failure"),
-            common: DashboardCommonContext::build(&db, auth.0),
+            common: DashboardCommonContext::build(&mut db, auth.0),
             config: &CONFIG_CONTEXT,
-            balance_total: get_balance_string(&db, auth.0, None),
+            balance_total: get_balance_string(&mut db, auth.0, None),
             payouts_total: payouts_total,
             payouts: payouts,
             has_more: has_more,
@@ -723,10 +729,10 @@ pub fn get_dashboard_payouts(auth: AuthGuard, db: DbConn, args: Form<DashboardAr
 #[get("/dashboard/payouts/partial/payouts/<page_number>")]
 pub fn get_dashboard_payouts_partial_payouts(
     auth: AuthGuard,
-    db: DbConn,
+    mut db: DbConn,
     page_number: u16,
 ) -> Template {
-    let (payouts, has_more) = list_payouts(&db, auth.0, page_number);
+    let (payouts, has_more) = list_payouts(&mut db, auth.0, page_number);
 
     Template::render(
         "dashboard_payouts_partial_payouts",
@@ -740,9 +746,11 @@ pub fn get_dashboard_payouts_partial_payouts(
 #[post("/dashboard/payouts/form/request")]
 pub fn post_dashboard_payouts_form_request(
     auth: AuthGuard,
-    db: DbConn,
+    mut db: DbConn,
 ) -> Result<Redirect, Status> {
-    let account_result = account.filter(account_id.eq(auth.0)).first::<Account>(&*db);
+    let account_result = account
+        .filter(account_id.eq(auth.0))
+        .first::<Account>(&mut *db);
 
     if let Ok(account_inner) = account_result {
         let result_code = {
@@ -759,7 +767,7 @@ pub fn post_dashboard_payouts_form_request(
                 "config_failure"
             } else {
                 // Check if there is money due
-                let balance_due = get_balance(&db, auth.0, Some(false));
+                let balance_due = get_balance(&mut db, auth.0, Some(false));
 
                 if balance_due > 0.0 {
                     if balance_due >= APP_CONF.payout.amount_minimum {
@@ -772,13 +780,13 @@ pub fn post_dashboard_payouts_form_request(
                                 .filter(balance_released.eq(false)),
                         )
                         .set((balance_released.eq(true), balance_updated_at.eq(&now_date)))
-                        .execute(&*db);
+                        .execute(&mut *db);
 
                         // Acquire latest payout number
                         let maximum_result = payout
                             .filter(payout_account_id.eq(auth.0))
                             .select(max(payout_number))
-                            .first::<Option<i32>>(&*db)
+                            .first::<Option<i32>>(&mut *db)
                             .map(|value| if value.is_none() { Some(0) } else { value });
 
                         match (update_result, maximum_result) {
@@ -786,14 +794,14 @@ pub fn post_dashboard_payouts_form_request(
                                 // Create payout
                                 let insert_result = diesel::insert_into(payout)
                                     .values((
-                                        &payout_amount.eq(BigDecimal::from(balance_due)),
+                                        &payout_amount.eq(balance_due as f64),
                                         &payout_number.eq(maximum_number + 1),
                                         &payout_currency.eq(&APP_CONF.payout.currency),
                                         &payout_account_id.eq(auth.0),
                                         &payout_created_at.eq(&now_date),
                                         &payout_updated_at.eq(&now_date),
                                     ))
-                                    .execute(&*db);
+                                    .execute(&mut *db);
 
                                 if insert_result.is_ok() == true {
                                     send_payout_emails(
@@ -831,10 +839,12 @@ pub fn post_dashboard_payouts_form_request(
 #[get("/dashboard/account?<args..>")]
 pub fn get_dashboard_account(
     auth: AuthGuard,
-    db: DbConn,
-    args: Form<DashboardArgs>,
+    mut db: DbConn,
+    args: DashboardArgs,
 ) -> Result<Template, Status> {
-    let account_result = account.filter(account_id.eq(auth.0)).first::<Account>(&*db);
+    let account_result = account
+        .filter(account_id.eq(auth.0))
+        .first::<Account>(&mut *db);
 
     if let Ok(account_inner) = account_result {
         let country_list = countries()
@@ -848,7 +858,7 @@ pub fn get_dashboard_account(
                 failure: check_argument_value(&args.result, "failure"),
                 neutral: check_argument_value(&args.result, "neutral"),
                 success: check_argument_value(&args.result, "success"),
-                common: DashboardCommonContext::build(&db, auth.0),
+                common: DashboardCommonContext::build(&mut db, auth.0),
                 config: &CONFIG_CONTEXT,
                 account: DashboardAccountContextAccount {
                     email: account_inner.email,
@@ -873,7 +883,7 @@ pub fn get_dashboard_account(
 #[post("/dashboard/account/form/account", data = "<data>")]
 pub fn post_dashboard_account_form_account(
     auth: AuthGuard,
-    db: DbConn,
+    mut db: DbConn,
     data: Form<DashboardAccountFormAccountData>,
 ) -> Redirect {
     let notify_balance_value = data.notify_balance == Some("1".to_string());
@@ -886,7 +896,7 @@ pub fn post_dashboard_account_form_account(
                     account_password.eq(&auth_password_encode(&data.password)),
                     account_notify_balance.eq(&notify_balance_value),
                 ))
-                .execute(&*db)
+                .execute(&mut *db)
                 .or(Err(()))
         } else {
             Err(())
@@ -897,7 +907,7 @@ pub fn post_dashboard_account_form_account(
                 account_email.eq(&data.email),
                 account_notify_balance.eq(&notify_balance_value),
             ))
-            .execute(&*db)
+            .execute(&mut *db)
             .or(Err(()))
     };
 
@@ -924,7 +934,7 @@ pub fn post_dashboard_account_form_account(
 #[post("/dashboard/account/form/payout", data = "<data>")]
 pub fn post_dashboard_account_form_payout(
     auth: AuthGuard,
-    db: DbConn,
+    mut db: DbConn,
     data: Form<DashboardAccountFormPayoutData>,
 ) -> Redirect {
     let update_result = diesel::update(account.filter(account_id.eq(auth.0)))
@@ -935,7 +945,7 @@ pub fn post_dashboard_account_form_payout(
             account_payout_method.eq(&data.payout_method),
             account_payout_instructions.eq(&data.payout_instructions),
         ))
-        .execute(&*db);
+        .execute(&mut *db);
 
     let count_updated = update_result.as_ref().unwrap_or(&0);
 
@@ -964,12 +974,12 @@ pub fn post_dashboard_account_form_payout(
 )]
 pub fn post_track_payment(
     _auth: TrackGuard,
-    db: DbConn,
+    mut db: DbConn,
     tracking_id: String,
     data: Json<TrackPaymentData>,
 ) -> Result<(), Status> {
     match track_handle_payment(
-        &db,
+        &mut db,
         &tracking_id,
         data.amount,
         &data.currency.to_uppercase(),
@@ -1004,8 +1014,12 @@ pub fn post_track_payment(
 }
 
 #[post("/track/signup/<tracking_id>")]
-pub fn post_track_signup(_auth: TrackGuard, db: DbConn, tracking_id: String) -> Result<(), Status> {
-    match track_handle_signup(&db, &tracking_id) {
+pub fn post_track_signup(
+    _auth: TrackGuard,
+    mut db: DbConn,
+    tracking_id: String,
+) -> Result<(), Status> {
+    match track_handle_signup(&mut db, &tracking_id) {
         Ok(_) => Ok(()),
         Err(TrackHandleSignupError::NotFound) => Err(Status::NotFound),
     }
@@ -1014,11 +1028,11 @@ pub fn post_track_signup(_auth: TrackGuard, db: DbConn, tracking_id: String) -> 
 #[post("/management/account", data = "<data>", format = "application/json")]
 pub fn post_management_account(
     _auth: ManagementGuard,
-    db: DbConn,
+    mut db: DbConn,
     data: Json<ManagementAccountData>,
 ) -> Result<(), Status> {
     match management_handle_account(
-        &db,
+        &mut db,
         &data.email,
         &data.full_name,
         &data.address,

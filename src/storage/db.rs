@@ -4,24 +4,23 @@
 // Copyright: 2018, Valerian Saliou <valerian@valeriansaliou.name>
 // License: Mozilla Public License v2.0 (MPL v2.0)
 
-use diesel::mysql::MysqlConnection;
+use diesel::prelude::*;
+use diesel::r2d2::ConnectionManager;
 use log;
-use r2d2;
-use r2d2_diesel::ConnectionManager;
 use rocket::http::Status;
-use rocket::request::{self, FromRequest};
-use rocket::{Outcome, Request, State};
-use std::ops::Deref;
+use rocket::request::{self, FromRequest, Outcome};
+use rocket::{Request, State};
+use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
-use APP_CONF;
+use crate::APP_CONF;
 
-type Pool = r2d2::Pool<ConnectionManager<MysqlConnection>>;
+type Pool = diesel::r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
-pub struct DbConn(pub r2d2::PooledConnection<ConnectionManager<MysqlConnection>>);
+pub struct DbConn(pub r2d2::PooledConnection<ConnectionManager<SqliteConnection>>);
 
 impl Deref for DbConn {
-    type Target = MysqlConnection;
+    type Target = SqliteConnection;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
@@ -29,14 +28,22 @@ impl Deref for DbConn {
     }
 }
 
-impl<'a, 'r> FromRequest<'a, 'r> for DbConn {
+impl DerefMut for DbConn {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[rocket::async_trait]
+impl<'a> FromRequest<'a> for DbConn {
     type Error = ();
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<DbConn, ()> {
-        let pool = request.guard::<State<Pool>>()?;
+    async fn from_request(request: &'a Request<'_>) -> request::Outcome<DbConn, ()> {
+        let pool = request.guard::<&State<Pool>>().await.unwrap();
         match pool.get() {
             Ok(conn) => Outcome::Success(DbConn(conn)),
-            Err(_) => Outcome::Failure((Status::ServiceUnavailable, ())),
+            Err(_) => Outcome::Error((Status::ServiceUnavailable, ())),
         }
     }
 }
@@ -44,7 +51,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for DbConn {
 pub fn pool() -> Pool {
     log::debug!("setting up db pool...");
 
-    let manager = ConnectionManager::<MysqlConnection>::new(APP_CONF.database.url.as_str());
+    let manager = ConnectionManager::<SqliteConnection>::new(APP_CONF.database.url.as_str());
 
     let pool = r2d2::Pool::builder()
         .max_size(APP_CONF.database.pool_size)

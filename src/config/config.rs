@@ -41,7 +41,7 @@ pub struct ConfigServer {
 
 #[derive(Deserialize)]
 pub struct ConfigDatabase {
-    pub url: SerdeUrl,
+    pub url: String,
 
     #[serde(default = "defaults::database_pool_size")]
     pub pool_size: u32,
